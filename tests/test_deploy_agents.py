@@ -93,5 +93,81 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(outside.read_text(), "preserve")
 
 
+class ClaudeDeploymentTests(unittest.TestCase):
+    BASE = 'name = "{name}"\ndescription = "Desc \\"q\\""\nmodel = "{model}"\nmodel_reasoning_effort = "medium"\ndeveloper_instructions = """\nLine 1\nLine 2\n"""\n'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.source = self.root / "agents"
+        (self.source / "design").mkdir(parents=True)
+        self.codex = self.root / "codex"
+        self.claude = self.root / "claude"
+
+    def role(self, name="atlas", model="gpt-6.1-sol", extra=""):
+        path = self.source / "design" / f"{name}.toml"
+        path.write_text(self.BASE.format(name=name, model=model) + extra)
+        return path
+
+    def test_default_mapping_renders_frontmatter_and_body(self):
+        self.role(model="gpt-6-luna")
+        MODULE.deploy(self.source, self.claude, runtime="claude")
+        text = (self.claude / "atlas.md").read_text()
+        self.assertEqual(
+            text,
+            '---\nname: atlas\ndescription: "Desc \\"q\\""\nmodel: sonnet\neffort: medium\n---\n\nLine 1\nLine 2\n',
+        )
+        self.assertIn("atlas.md", (self.claude / MODULE.MANIFEST).read_text())
+        self.assertFalse(MODULE.deploy(self.source, self.claude, check=True, runtime="claude")[0])
+
+    def test_claude_table_overrides_and_is_stripped_from_codex_copy(self):
+        plain = self.role().read_bytes()
+        self.role(extra='\n[claude]\nmodel = "haiku"\neffort = "low"\ntools = ["Read", "Grep"]\n')
+        MODULE.deploy_many(self.source, {"codex": self.codex, "claude": self.claude})
+        self.assertEqual((self.codex / "atlas.toml").read_bytes(), plain)
+        text = (self.claude / "atlas.md").read_text()
+        self.assertIn("model: haiku\neffort: low\ntools: Read, Grep\n", text)
+
+    def test_invalid_claude_settings_are_rejected(self):
+        cases = {
+            '\n[claude]\nmodle = "opus"\n': "Unknown",
+            '\n[claude]\neffort = "minimal"\n': "effort",
+            '\n[claude]\ntools = []\n': "tools",
+            '\nclaude = { model = "opus" }\n': "trailing",
+        }
+        for extra, error in cases.items():
+            with self.subTest(extra=extra):
+                self.role(extra=extra)
+                with self.assertRaisesRegex(ValueError, error):
+                    MODULE.deploy(self.source, self.claude, runtime="claude")
+                self.assertFalse(self.claude.exists())
+
+    def test_claude_table_must_be_last(self):
+        path = self.role()
+        text = path.read_text().replace("developer_instructions", '[claude]\nmodel = "opus"\n\n[x]\ndeveloper_instructions')
+        path.write_text(text)
+        with self.assertRaises(ValueError):
+            MODULE.deploy(self.source, self.codex)
+
+    def test_unknown_model_requires_claude_override(self):
+        self.role(model="gpt-unknown")
+        MODULE.deploy(self.source, self.codex)
+        with self.assertRaisesRegex(ValueError, "mapping"):
+            MODULE.deploy(self.source, self.claude, runtime="claude")
+        self.role(model="gpt-unknown", extra='\n[claude]\nmodel = "inherit"\n')
+        MODULE.deploy(self.source, self.claude, runtime="claude")
+        self.assertIn("model: inherit", (self.claude / "atlas.md").read_text())
+
+    def test_conflict_in_one_runtime_blocks_all_writes(self):
+        self.role()
+        self.claude.mkdir()
+        (self.claude / "atlas.md").write_text("unmanaged")
+        with self.assertRaisesRegex(ValueError, "Unmanaged"):
+            MODULE.deploy_many(self.source, {"codex": self.codex, "claude": self.claude})
+        self.assertFalse(self.codex.exists())
+        self.assertEqual((self.claude / "atlas.md").read_text(), "unmanaged")
+
+
 if __name__ == "__main__":
     unittest.main()

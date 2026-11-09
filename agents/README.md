@@ -6,18 +6,49 @@
 
 ## 원본 관리와 실행용 배치
 
-역할 원본은 `agents/` 아래 분류별로 관리하며, 실행용 `.codex/agents/*.toml`은 수정하지 않는다. `coordination`, `design`, `implementation`, `verification`, `research`, `knowledge`는 파일 분류이며 고정 팀을 뜻하지 않는다. 팀 성격은 `teams/TEAM_PROFILES.md`, 실제 구성은 태스크의 팀 구성 기록에 둔다.
+역할 원본은 `agents/` 아래 분류별로 관리하며, 실행용 사본(`.codex/agents/*.toml`, `.claude/agents/*.md`)은 수정하지 않는다. `coordination`, `design`, `implementation`, `verification`, `research`, `knowledge`는 파일 분류이며 고정 팀을 뜻하지 않는다. 팀 성격은 `teams/TEAM_PROFILES.md`, 실제 구성은 태스크의 팀 구성 기록에 둔다.
 
 Python 3.11 이상에서 저장소 루트 기준으로 실행한다.
 
 ```bash
 python3 scripts/deploy_agents.py
 python3 scripts/deploy_agents.py --check
+python3 scripts/deploy_agents.py --runtime codex   # 특정 도구만 (반복 지정 가능)
 ```
 
-스크립트는 하위 폴더 원본을 읽어 평탄하게 배치한다. 이름·파일명 중복, 필수 필드와 TOML 문법을 검사한다. 관리 이력의 해시로 실행용 파일의 직접 수정 여부를 확인하며, 충돌이 있으면 파일을 변경하기 전에 중단한다. 직접 수정한 실행용 파일은 내용을 원본에 반영한 뒤 다시 배치한다.
+스크립트는 하위 폴더 원본을 읽어 도구별 디렉터리에 평탄하게 배치한다.
 
-삭제·이름 변경된 역할의 사본은 이전 배치가 관리했고 이후 수정되지 않은 경우에만 정리한다. 다른 도구나 사용자가 추가한 파일은 보존한다. 기존 사본은 원본과 내용이 같은 경우에만 관리 대상으로 채택한다. `.codex/agents/.deployment-manifest.json`은 배치 이력이므로 직접 편집하지 않는다. `--check`는 파일을 쓰지 않고 최신 여부와 충돌을 검사한다.
+| 도구 | 실행용 사본 | 형식 |
+| --- | --- | --- |
+| Codex | `.codex/agents/<이름>.toml` | 원본 TOML에서 `[claude]` 테이블만 제외한 사본 |
+| Claude Code | `.claude/agents/<이름>.md` | YAML frontmatter(`name`, `description`, `model`, `effort`, 선택적 `tools`) + `developer_instructions` 본문 |
+
+이름·파일명 중복, 필수 필드와 TOML 문법, `[claude]` 설정을 검사한다. 관리 이력의 해시로 실행용 파일의 직접 수정 여부를 확인하며, 어느 한 도구에서라도 충돌이 있으면 모든 도구의 파일을 변경하기 전에 중단한다. 직접 수정한 실행용 파일은 내용을 원본에 반영한 뒤 다시 배치한다.
+
+삭제·이름 변경된 역할의 사본은 이전 배치가 관리했고 이후 수정되지 않은 경우에만 정리한다. 다른 도구나 사용자가 추가한 파일은 보존한다. 기존 사본은 원본과 내용이 같은 경우에만 관리 대상으로 채택한다. 각 사본 디렉터리의 `.deployment-manifest.json`은 배치 이력이므로 직접 편집하지 않는다. `--check`는 파일을 쓰지 않고 최신 여부와 충돌을 검사한다.
+
+### Claude Code 설정
+
+Claude Code의 `model`·`effort`는 기본적으로 Codex 필드에서 변환한다.
+
+| Codex `model` | Claude Code `model` |
+| --- | --- |
+| `gpt-6.1-sol` | `opus` |
+| `gpt-6-luna` | `sonnet` |
+
+`effort`는 `model_reasoning_effort` 값을 그대로 쓴다(`low`, `medium`, `high`, `xhigh`, `max`만 허용). 매핑이 없는 모델이나 허용되지 않는 effort는 배치 시 오류가 나므로 역할별로 지정한다. 역할별 값은 원본 파일 **맨 끝**의 `[claude]` 테이블에 둔다.
+
+```toml
+# agents/<분류>/<이름>.toml 의 마지막
+[claude]
+model = "opus"          # opus / sonnet / haiku / inherit 또는 전체 모델 ID
+effort = "high"
+tools = ["Read", "Grep", "Glob", "Bash"]   # 선택. 생략하면 모든 도구 허용
+```
+
+`[claude]`는 원본의 마지막 테이블이어야 하며 `model`, `effort`, `tools` 키만 허용한다. Codex 사본에는 포함되지 않는다. 이 변환표도 초기값이며 같은 기준으로 운용 결과에 따라 조정한다. Opus의 high와 Sol의 high가 같은 품질·비용을 뜻하지 않는다.
+
+현재 모든 역할은 `tools`를 지정하지 않았다. 설계·검증·조사 역할도 배정된 설계 문서나 테스트 파일을 작성하므로, Edit·Write를 막으면 정해진 업무를 수행할 수 없다. 수정 범위 제한은 지금처럼 지침으로 유지한다. 파일을 전혀 쓰지 않는 역할을 새로 만들 때 `tools`로 제한한다. `Bash`를 허용하면 셸로도 파일을 수정할 수 있으므로 `tools`만으로 완전한 읽기 전용이 되지는 않는다.
 
 새 역할도 자동으로 실행되거나 팀에 편입되지는 않는다. Mosaic와 의논할 때 후보로 비교한다. 실제 모델 가용성과 실행은 별도로 확인한다.
 
@@ -67,7 +98,7 @@ python3 scripts/deploy_agents.py --check
 | harness | `gpt-6.1-sol` | `high` | 결정적인 재현·테스트 환경 구축 |
 | curator | `gpt-6.1-sol` | `medium` | 여러 회고의 근거 비교와 규칙 정리 |
 
-설정의 기준은 각 역할 TOML의 최상위 `model`, `model_reasoning_effort` 필드다. 업무 프로필은 필요한 관점과 산출물을 정한다. 구성 협의에서 역할과 모델·effort를 정하고, 역할 파일의 기본값을 참고한다. 모델별 effort의 의미가 같다고 가정하지 않는다. Luna의 high와 Sol의 high가 같은 품질·비용·시간을 뜻하지는 않는다.
+설정의 기준은 각 역할 TOML의 최상위 `model`, `model_reasoning_effort` 필드다(Claude Code 값은 위의 변환표와 `[claude]` 테이블을 따른다). 업무 프로필은 필요한 관점과 산출물을 정한다. 구성 협의에서 역할과 모델·effort를 정하고, 역할 파일의 기본값을 참고한다. 모델별 effort의 의미가 같다고 가정하지 않는다. Luna의 high와 Sol의 high가 같은 품질·비용·시간을 뜻하지는 않는다.
 
 ```toml
 model = "gpt-6.1-sol"
@@ -77,7 +108,8 @@ model_reasoning_effort = "high"
 ### 실행 시 적용
 
 - 커스텀 역할 설정을 지원하는 클라이언트에서는 역할 파일의 모델·effort를 적용한다. 지침 문자열만 읽어서 전달하는 방식에서는 리드가 두 설정도 실행 인자로 명시해야 한다.
-- 현재 협업 도구는 전체 대화를 상속하는 생성 방식에서 모델·effort 변경을 지원하지 않는다. 역할별 설정을 적용할 때는 `fork_turns="none"`으로 생성하고 `model` 및 `reasoning_effort`를 전달한다. 역할의 전체 지침, 목표, 파일 경로, 관련 결정, 완료 조건을 함께 전달한다. 다른 실행 도구에서는 해당 도구의 지원 방식을 확인한다.
+- Claude Code에서는 역할 이름을 `subagent_type`으로 지정해 생성하면 정의 파일의 `model`·`effort`가 적용된다. 서브에이전트는 메인의 대화를 상속하지 않으므로 목표, 파일 경로, 관련 결정, 완료 조건을 업무 배정에 모두 담는다. 정의 없이 범용 에이전트에 지침만 전달할 때는 `model`을 명시한다.
+- Codex 협업 도구는 전체 대화를 상속하는 생성 방식에서 모델·effort 변경을 지원하지 않는다. 역할별 설정을 적용할 때는 `fork_turns="none"`으로 생성하고 `model` 및 `reasoning_effort`를 전달한다. 역할의 전체 지침, 목표, 파일 경로, 관련 결정, 완료 조건을 함께 전달한다. 다른 실행 도구에서는 해당 도구의 지원 방식을 확인한다.
 - 메인이 Compass를 맡으면 `compass.toml`의 설정을 읽어도 실행 중인 메인의 모델은 바뀌지 않는다. 리드는 현재 세션 모델로 동작한다는 점을 보고하고, 파일 설정은 별도로 생성하는 Compass 또는 이후 세션 구성의 기준으로 사용한다.
 - 지정 모델을 사용할 수 없으면 성공적으로 적용했다고 보고하지 않는다. 제약과 대안을 알리고 사용자의 모델 선택 조건을 따른다.
 - 작업 배정 시 요청한 모델·effort를 기록한다. 런타임에서 실제 설정을 확인할 수 있으면 함께 기록하고, 확인하지 못한 경우 요청값과 실측값을 구분한다.
@@ -92,9 +124,21 @@ Bolt·Journey는 범위와 수용 기준이 명확한 작업을 기준으로 Lun
 
 ## 사용 방법
 
-커스텀 에이전트를 지원하는 로컬 Codex 클라이언트의 프로젝트용 위치는 `.codex/agents/`, 개인용 위치는 `~/.codex/agents/`다. 역할 원본은 이 저장소의 `agents/<분류>/`에 있고 `.codex/agents/`는 배치된 실행용 사본이다. 실제 저장소를 별도의 프로젝트 루트로 열면 그 프로젝트의 `.codex/agents/`에 필요한 TOML을 배치한다. 같은 이름의 기존 파일은 비교 후 병합한다.
+### 도구별 사용 방법
+
+| | Codex | Claude Code |
+| --- | --- | --- |
+| 프로젝트용 위치 | `.codex/agents/*.toml` | `.claude/agents/*.md` |
+| 개인용 위치 | `~/.codex/agents/` | `~/.claude/agents/` |
+| 프로젝트 지침 | `AGENTS.md` | `CLAUDE.md` (`@AGENTS.md`로 같은 내용 import) |
+| 역할별 모델·effort 적용 | 역할 TOML 설정 또는 생성 시 인자 | 정의 파일의 `model`·`effort`. 이름(`subagent_type`)으로 호출하면 자동 적용 |
+| 하위 에이전트의 추가 생성 | 실행 환경 지원 여부를 확인 | 서브에이전트는 다른 서브에이전트를 생성하지 못한다 |
+
+역할 원본은 이 저장소의 `agents/<분류>/`에 있고 두 디렉터리는 배치된 실행용 사본이다. 실제 저장소를 별도의 프로젝트 루트로 열면 그 프로젝트의 해당 디렉터리에 필요한 사본을 복사하거나, 모든 프로젝트에서 쓰려면 개인용 위치에 둔다. 같은 이름의 기존 파일은 비교 후 병합한다.
 
 설정 탐색 범위와 등록 여부는 사용하는 클라이언트에서 확인해야 한다. 이 파일을 생성한 세션에서 역할이 자동으로 다시 로드되었다고 가정하지 않는다. 이름 기반 선택이 제공되지 않는 환경에서는 메인이 해당 TOML의 `developer_instructions`를 읽고 위임 지침으로 전달할 수 있다.
+
+Claude Code에서는 Mosaic와 Compass를 메인 세션이 맡는다. Mosaic는 사용자와 대화하며 구성을 의논해야 하고, Compass는 다른 역할에 업무를 배정해야 하는데, 서브에이전트는 사용자와 직접 대화하거나 다른 서브에이전트를 생성할 수 없기 때문이다. 메인이 해당 TOML을 읽고 역할을 수행하며, 설계·구현·검증 역할만 서브에이전트로 생성한다. 두 역할의 서브에이전트 정의도 배치되지만, 구성안 초안 작성이나 결과 통합 검토처럼 혼자 끝낼 수 있는 일에만 사용한다.
 
 먼저 `agents/coordination/mosaic.toml`을 읽어 구성 상담을 요청한다. 메인이 상담 역할을 직접 맡을 수 있다.
 
@@ -147,7 +191,7 @@ Bolt·Journey는 범위와 수용 기준이 명확한 작업을 기준으로 Lun
 | --- | --- | --- |
 | 개별 에이전트 | `agents/<분류>/<역할>.toml` 원본의 `developer_instructions` | Scalpel은 공통 함수 수정 전에 호출자를 확인한다. |
 | 특정 팀 | [teams/TEAM_PROFILES.md](../teams/TEAM_PROFILES.md)의 해당 프리셋 | integration 팀은 구현 전에 오류 응답 계약을 확정한다. |
-| 프로젝트 전체 | 해당 프로젝트의 `AGENTS.md` | 생성된 코드는 직접 수정하지 않는다. |
+| 프로젝트 전체 | 해당 프로젝트의 `AGENTS.md` (Claude Code는 `CLAUDE.md`에서 import) | 생성된 코드는 직접 수정하지 않는다. |
 | 이번 태스크만 | 사용자 요청 또는 리드의 업무 배정 | 이번 작업은 설계까지만 진행한다. |
 | 작업 회고와 근거 | 프로젝트의 기존 회고·결정 기록 위치 | 발생한 문제, 대응, 결과, 재사용할 교훈을 기록한다. |
 
@@ -245,6 +289,8 @@ Scalpel 추가 규칙:
 
 ## 형식 근거
 
-공식 문서의 독립 TOML 형식인 `name`, `description`, `developer_instructions`를 사용했다.
+원본은 Codex 공식 문서의 독립 TOML 형식인 `name`, `description`, `developer_instructions`를 사용했다.
 
 https://learn.chatgpt.com/docs/agent-configuration/subagents
+
+Claude Code 사본은 서브에이전트 정의 형식(`.claude/agents/*.md`, YAML frontmatter + 시스템 프롬프트 본문)으로 변환한다. Claude Code 2.1.319에서 16개 역할이 모두 `subagent_type`으로 로드되는 것을 확인했다(2026-11-09).
