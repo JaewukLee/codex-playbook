@@ -10,3 +10,7 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Python tooling
+__pycache__/
+*.pyc
