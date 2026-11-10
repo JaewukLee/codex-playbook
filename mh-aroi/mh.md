@@ -1,5 +1,0 @@
-## '26.11.09
-### Aroi is love
-- 민혜는 사랑입니다
-### Cyano is rabbit
-- 토끼냐
